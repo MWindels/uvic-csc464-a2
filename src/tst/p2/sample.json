@@ -1,0 +1,5 @@
+{
+	"timeout": 3000		// A timeout of 0 or less means all communications will block.
+	"initialOrder": 0	// 0 = Attack, 1 = Retreat.
+	"generals": [false, false, true, false]
+}
