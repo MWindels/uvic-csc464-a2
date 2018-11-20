@@ -10,7 +10,7 @@ const (
 	totalOrders
 )
 
-const DefaultOrder = Retreat
+const DefaultOrder Order = Retreat
 
 var Timeout time.Duration = 3000
 
@@ -48,6 +48,14 @@ type General struct {
 
 func InitGeneral(me uint, t bool) General {
 	return General{id: me, traitor: t}
+}
+
+func (g General) ID() uint {
+	return g.id
+}
+
+func (g General) Traitor() bool {
+	return g.traitor
 }
 
 type consensusNode struct {
@@ -120,8 +128,7 @@ func (g General) recursiveOM(cn *consensusNode, o Order) (Order, bool) {
 				vj = append(vj, result)
 			}
 		}
-		vj = append(vj, vi)
-		return Majority(vj...), true
+		return Majority(append(vj, vi)...), true
 	}else{
 		if !g.traitor {
 			for range cn.ltns {
@@ -140,6 +147,10 @@ func (g General) recursiveOM(cn *consensusNode, o Order) (Order, bool) {
 	}
 }
 
-func (g General) OM(ct ConsensusTree, initialOrder Order) (Order, bool) {
-	return g.recursiveOM(ct.root, initialOrder)
+func (g General) OM(ct ConsensusTree) (Order, bool) {
+	return g.recursiveOM(ct.root, DefaultOrder)
+}
+
+func (g General) OMLeader(ct ConsensusTree, initialOrder Order) {
+	g.recursiveOM(ct.root, initialOrder)
 }
