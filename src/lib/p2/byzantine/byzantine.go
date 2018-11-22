@@ -12,7 +12,7 @@ const (
 
 const DefaultOrder Order = Retreat
 
-var Timeout time.Duration = 3000
+var Timeout time.Duration = 0	//Defaults to 0, but can be set by the user.
 
 func Majority(orders ...Order) Order {
 	sums := make(map[Order]uint)
@@ -60,8 +60,7 @@ func (g General) Traitor() bool {
 
 type consensusNode struct {
 	cmdr uint
-	messenger chan Order
-	ltns []uint
+	messengers map[uint](chan Order)
 	children [](*consensusNode)
 }
 
@@ -70,7 +69,11 @@ type ConsensusTree struct {
 }
 
 func initConsensusNode(m uint, c uint, ls []uint) *consensusNode {
-	node := consensusNode{cmdr: c, messenger: make(chan Order), ltns: ls, children: make([](*consensusNode), 0, len(ls))}
+	msngrs := make(map[uint](chan Order))
+	for _, l := range ls {
+		msngrs[l] = make(chan Order)
+	}
+	node := consensusNode{cmdr: c, messengers: msngrs, children: make([](*consensusNode), 0, len(ls))}
 	if m > 0 && len(ls) > 1 {
 		for i := 0; i < len(ls); i++ {
 			lsNext := append([]uint(nil), ls...)
@@ -93,35 +96,35 @@ func InitConsensusTree(m uint, totalGenerals uint) ConsensusTree {
 	return ConsensusTree{root: initConsensusNode(m, 0, lieutenants)}
 }
 
-func (cn *consensusNode) send(o Order) {
+func send(ch chan Order, o Order) {
 	if Timeout > 0 {
 		select {
-		case cn.messenger <- o:
+		case ch <- o:
 			return
 		case <- time.After(Timeout * time.Millisecond):
 			return
 		}
 	}else{
-		cn.messenger <- o
+		ch <- o
 	}
 }
 
-func (cn *consensusNode) receive() Order {
+func receive(ch chan Order) Order {
 	if Timeout > 0 {
 		select {
-		case o := <- cn.messenger:
+		case o := <- ch:
 			return o
 		case <- time.After(Timeout * time.Millisecond):
 			return DefaultOrder
 		}
 	}else{
-		return <- cn.messenger
+		return <- ch
 	}
 }
 
 func (g General) recursiveOM(cn *consensusNode, o Order) (Order, bool) {
 	if cn.cmdr != g.id {
-		vi := cn.receive()
+		vi := receive(cn.messengers[g.id])
 		vj := make([]Order, 0, len(cn.children))
 		for _, child := range cn.children {
 			if result, valid := g.recursiveOM(child, vi); valid {
@@ -131,26 +134,33 @@ func (g General) recursiveOM(cn *consensusNode, o Order) (Order, bool) {
 		return Majority(append(vj, vi)...), true
 	}else{
 		if !g.traitor {
-			for range cn.ltns {
-				cn.send(o)
+			for _, msngr := range cn.messengers {
+				send(msngr, o)
 			}
 		}else{
-			for _, ltn := range cn.ltns {
-				if ltn % 2 == 0 {
-					cn.send((o + 1) % totalOrders)
+			for id, msngr := range cn.messengers {
+				if id % 2 == 0 {
+					send(msngr, (o + 1) % totalOrders)
 				}else{
-					cn.send(o)
+					send(msngr, o)
 				}
 			}
 		}
-		return DefaultOrder, false
+		return o, false
 	}
 }
 
-func (g General) OM(ct ConsensusTree) (Order, bool) {
-	return g.recursiveOM(ct.root, DefaultOrder)
+func (g General) OM(ct ConsensusTree) Order {
+	if g.id == 0 {
+		panic("OM cannot be called by the commanding general.")
+	}
+	result, _ := g.recursiveOM(ct.root, DefaultOrder)
+	return result
 }
 
 func (g General) OMLeader(ct ConsensusTree, initialOrder Order) {
+	if g.id != 0 {
+		panic("OMLeader cannot be called by a subordinate general.")
+	}
 	g.recursiveOM(ct.root, initialOrder)
 }

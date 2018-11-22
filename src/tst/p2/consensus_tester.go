@@ -15,7 +15,7 @@ func recursivelyPermute(index int, initial, total, traitors uint, permutations *
 			(*permutations)[index] = append((*permutations)[index], byzantine.InitGeneral(i, traitors != 0))
 		}
 	}else{
-		original := (*permutations)[index]
+		original := append([]byzantine.General{}, (*permutations)[index]...)
 		
 		(*permutations)[index] = append(original, byzantine.InitGeneral(initial, false))
 		recursivelyPermute(index, initial + 1, total, traitors, permutations)
@@ -53,40 +53,33 @@ func testScenario(totalGenerals uint, initial byzantine.Order) bool {
 			validResult := !permutation[0].Traitor()
 			consensus := initial
 			
-			for i, gen := range permutation {
-				if i == 0 {
+			for _, gen := range permutation {
+				if gen.ID() == 0 {
 					go func(g byzantine.General) {
 						defer func() {done <- true}()
 						g.OMLeader(tree, initial)
 					}(gen)
 				}else{
-					go func(g byzantine.General) {
-						result, valid := g.OM(tree)
+					go func(g byzantine.General, resultCorrect bool) {
+						defer func() {done <- resultCorrect}()
+						result := g.OM(tree)
 						
 						mutex.Lock()
 						defer mutex.Unlock()
 						
-						if valid {
-							if !g.Traitor() {
-								if validResult {
-									if result != consensus {
-										fmt.Printf("TEST (n = %d, m = %d, ct = %t) FAILED\n\tLieutenant %d (loyal) not reach consensus!\n", totalGenerals, m, permutation[0].Traitor(), g.ID())
-										fmt.Printf("\tDecided to %s while consensus was %s.\n", orderToString(result), orderToString(consensus))
-										done <- false
-										return
-									}
-								}else{
-									validResult = true
-									consensus = result
+						if !g.Traitor() {
+							if validResult {
+								if result != consensus {
+									fmt.Printf("\tFAILURE: Lieutenant %d (loyal) decided to %s while consensus was %s.\n", g.ID(), orderToString(result), orderToString(consensus))
+									return
 								}
+							}else{
+								validResult = true
+								consensus = result
 							}
-						}else{
-							fmt.Printf("TEST (n = %d, m = %d, ct = %t) FAILED\n\tLieutenant %d returned invalid result!\n", totalGenerals, m, permutation[0].Traitor(), g.ID())
-							done <- false
-							return
 						}
-						done <- true
-					}(gen)
+						resultCorrect = true
+					}(gen, false)
 				}
 			}
 			
@@ -97,7 +90,15 @@ func testScenario(totalGenerals uint, initial byzantine.Order) bool {
 			totalSuccess = totalSuccess && success
 			if success {
 				if validResult {
-					fmt.Printf("Test (n = %d, m = %d, ct = %t) passed.  Consensus: %s.\n", totalGenerals, m, permutation[0].Traitor(), orderToString(consensus))
+					fmt.Printf("Test (n = %d, m = %d, permute = ", totalGenerals, m)
+					for _, gen := range permutation {
+						if gen.Traitor() {
+							fmt.Print("T")
+						}else{
+							fmt.Print(".")
+						}
+					}
+					fmt.Printf(") passed.  Consensus: %s.\n", orderToString(consensus))
 				}
 			}
 		}
@@ -111,7 +112,7 @@ func main() {
 		return
 	}
 	
-	if gens, err := strconv.Atoi(os.Args[1]); err == nil {
+	if gens, err := strconv.Atoi(os.Args[1]); err == nil && gens >= 2 {
 		if strings.ToLower(os.Args[2]) == "attack" {
 			if testScenario(uint(gens), byzantine.Attack) {
 				fmt.Println("\nAll tests passed!")
@@ -129,6 +130,10 @@ func main() {
 			return
 		}
 	}else{
-		fmt.Println("Error: Read in a value for number_of_generals that wasn't an integer.")
+		if gens < 2 {
+			fmt.Println("Error: Read in a value for number_of_generals that was less than 2.")
+		}else{
+			fmt.Println("Error: Read in a value for number_of_generals that wasn't an integer.")
+		}
 	}
 }
