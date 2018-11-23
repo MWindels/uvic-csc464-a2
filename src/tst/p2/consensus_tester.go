@@ -88,18 +88,22 @@ func testScenario(totalGenerals uint, initial byzantine.Order) bool {
 				success = success && (<- done)
 			}
 			totalSuccess = totalSuccess && success
+			fmt.Printf("Test (n = %d, m = %d, permute = ", totalGenerals, m)
+			for _, gen := range permutation {
+				if gen.Traitor() {
+					fmt.Print("T")
+				}else{
+					fmt.Print(".")
+				}
+			}
 			if success {
 				if validResult {
-					fmt.Printf("Test (n = %d, m = %d, permute = ", totalGenerals, m)
-					for _, gen := range permutation {
-						if gen.Traitor() {
-							fmt.Print("T")
-						}else{
-							fmt.Print(".")
-						}
-					}
 					fmt.Printf(") passed.  Consensus: %s.\n", orderToString(consensus))
+				}else{
+					fmt.Print(") inconclusive, no loyal generals.\n")
 				}
+			}else{
+				fmt.Print(") FAILED!\n")
 			}
 		}
 	}
