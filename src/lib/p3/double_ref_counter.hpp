@@ -17,7 +17,6 @@ public:
 	using value_type = T;
 	class counted_ptr;
 	
-	double_ref_counter() : front_end(external_counter{nullptr, 0}) {}
 	template<class... Args> double_ref_counter(Args&&... args) : front_end(external_counter{new internal_counter(std::forward<Args>(args)...), 0}) {}
 	double_ref_counter(const double_ref_counter&) = delete;
 	double_ref_counter(double_ref_counter&&) = delete;				//May implement in the future, but not exactly paramount.
@@ -28,7 +27,7 @@ public:
 	
 	counted_ptr obtain();
 	template<class... Args> void replace(Args&&... args);
-	template<class... Args> bool try_replace(Args&&... args);
+	template<class... Args> bool try_replace(const counted_ptr& expected, Args&&... args);
 	
 private:
 	
@@ -46,8 +45,10 @@ template <class T>
 double_ref_counter<T>::~double_ref_counter(){
 	external_counter prev_front_end = front_end.load();		//memory order?
 	while(!front_end.compare_exchange_weak(prev_front_end, external_counter{nullptr, 0})){}	//memory order?
-	if(prev_front_end.internals->in_count.fetch_sub(prev_front_end.ex_count) == prev_front_end.ex_count){	//memory order?
-		delete prev_front_end.internals;
+	if(prev_front_end.internals != nullptr){
+		if(prev_front_end.internals->in_count.fetch_sub(prev_front_end.ex_count) == prev_front_end.ex_count){	//memory order?
+			delete prev_front_end.internals;
+		}
 	}
 }
 
@@ -66,24 +67,32 @@ template <class... Args>
 void double_ref_counter<T>::replace(Args&&... args){
 	external_counter old_front_end = front_end.load(), new_front_end{new internal_counter(std::forward<Args>(args)...), 0};	//memory order?
 	while(!front_end.compare_exchange_weak(old_front_end, new_front_end)){}	//need to ensure that the new_front_end was actually initialized before this CAS, memory order?
-	if(old_front_end.internals->in_count.fetch_sub(old_front_end.ex_count) == old_front_end.ex_count){	//memory order? don't want the delete happening before this...
-		delete old_front_end.internals;
+	if(old_front_end.internals != nullptr){
+		if(old_front_end.internals->in_count.fetch_sub(old_front_end.ex_count) == old_front_end.ex_count){	//memory order? don't want the delete happening before this...
+			delete old_front_end.internals;
+		}
 	}
 }
 
 template <class T>
 template <class... Args>
-bool double_ref_counter<T>::try_replace(Args&&... args){
-	external_counter old_front_end = front_end.load(), new_front_end{new internal_counter(std::forward<Args>(args)...), 0};	//memory order?
-	if(front_end.compare_exchange_strong(old_front_end, new_front_end)){	//memory order? should probably have different orders for success and failure
-		if(old_front_end.internals->in_count.fetch_sub(old_front_end.ex_count) == old_front_end.ex_count){	//memory order? also don't want delete happening before this...
-			delete old_front_end.internals;
-		}
-		return true;
-	}else{
-		delete new_front_end.internals;
+bool double_ref_counter<T>::try_replace(const counted_ptr& expected, Args&&... args){
+	external_counter old_front_end = front_end.load();	//memory order?
+	if(old_front_end.internals != expected.counted_internals){
 		return false;
 	}
+	
+	external_counter new_front_end{new internal_counter(std::forward<Args>(args)...), 0};
+	while(!front_end.compare_exchange_weak(old_front_end, new_front_end)){	//memory order?
+		if(old_front_end.internals != expected.counted_internals){
+			delete new_front_end.internals;
+			return false;
+		}
+	}
+	if(old_front_end.internals != nullptr){
+		old_front_end.internals->in_count.fetch_sub(old_front_end.ex_count);	//memory order?  No need to check if in_count is zero, since expected still has to call release if expected.counted_internals is non-null (implicitly).
+	}
+	return true;
 }
 
 /*
@@ -92,7 +101,6 @@ bool double_ref_counter<T>::try_replace(Args&&... args){
 template <class T>
 struct double_ref_counter<T>::internal_counter{
 	
-	internal_counter() = delete;
 	template <class... Args> internal_counter(Args&&... args) : data(std::forward<Args>(args)...), in_count(0) {}
 	internal_counter(const internal_counter&) = delete;
 	internal_counter(internal_counter&&) = delete;
@@ -131,13 +139,15 @@ public:
 	counted_ptr& operator=(const counted_ptr&) = delete;
 	counted_ptr& operator=(counted_ptr&& other);
 	
-	const value_type& operator*() const {return counted_internals->data;}
+	const value_type& operator*() const {return counted_internals->data;}		//Just let these four functions throw nullptr exceptions if counted_internals is pointing to null, nothng else can really be done.
 	const value_type* operator->() const {return &(counted_internals->data);}
 	
 	value_type& operator*() {return counted_internals->data;}		//Some use of SFINAE would be good here to hide these when value_type is const.
 	value_type* operator->() {return &(counted_internals->data);}	//Likewise.
 	
 private:
+	
+	friend double_ref_counter<T>;
 	
 	internal_counter* counted_internals;
 	
