@@ -22,6 +22,7 @@ public:
 	loud_object& operator=(loud_object&& other) {num = other.num; std::unique_lock lk(out_mu); std::cout << "(" << num << ") Move Assign.\n"; return *this;}
 	
 	int get_num() const {return num;}
+	void set_num(int i) {num = i;}
 	
 private:
 	
@@ -36,6 +37,9 @@ std::ostream& operator<<(std::ostream& out, const loud_object& lo){
 template <class T>
 void obtainer(lockfree::double_ref_counter<T>& counter){
 	typename lockfree::double_ref_counter<T>::counted_ptr value = counter.obtain();
+	
+	//value->set_num(-2);	//This was here just to verify that my use of SFINAE in counted_ptr worked.
+	//(*value).set_num(-3);	//Likewise.
 	
 	std::unique_lock lk(out_mu);
 	std::cout << "\t[Obtain] " << *value << ".\n";
@@ -56,12 +60,11 @@ void replacer(int i, lockfree::double_ref_counter<T>& counter){
 
 template <class T>
 void try_replacer(int i, lockfree::double_ref_counter<T>& counter){
-	typename lockfree::double_ref_counter<T>::counted_ptr expected = counter.obtain();
-	
 	{
 		std::unique_lock lk(out_mu);
 		std::cout << "\t[Try-Replace " << i << "] Trying...\n";
 	}
+	typename lockfree::double_ref_counter<T>::counted_ptr expected = counter.obtain();
 	if(counter.try_replace(expected, i)){
 		std::unique_lock lk(out_mu);
 		std::cout << "\t[Try-Replace " << i << "] Success.\n";
